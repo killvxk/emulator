@@ -5,13 +5,49 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>cn.banny</groupId>
-    <artifactId>emulator</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <artifactId>unidbg</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
+    <profiles>
+        <profile>
+            <id>osx64</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <properties>
+                <dynamic.lib.location>prebuilt/osx64</dynamic.lib.location>
+            </properties>
+        </profile>
+        <profile>
+            <id>linux64</id>
+            <properties>
+                <dynamic.lib.location>prebuilt/linux64</dynamic.lib.location>
+            </properties>
+        </profile>
+        <profile>
+            <id>win32</id>
+            <properties>
+                <dynamic.lib.location>prebuilt/win32</dynamic.lib.location>
+            </properties>
+        </profile>
+        <profile>
+            <id>win64</id>
+            <properties>
+                <dynamic.lib.location>prebuilt/win64</dynamic.lib.location>
+            </properties>
+        </profile>
+    </profiles>
     <build>
         <plugins>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>2.12.4</version>
+                <configuration>
+                    <argLine>-Djava.library.path=${dynamic.lib.location} -Djna.library.path=${dynamic.lib.location}</argLine>
+                </configuration>
+            </plugin>
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.3</version>
@@ -51,6 +87,8 @@
             <groupId>org.unicorn-engine</groupId>
             <artifactId>unicorn</artifactId>
             <version>1.0.1</version>
+            <scope>system</scope>
+            <systemPath>${basedir}/prebuilt/jar/unicorn-1.0.1.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>net.java.dev.jna</groupId>
@@ -61,16 +99,22 @@
             <groupId>org.capstone-engine</groupId>
             <artifactId>capstone</artifactId>
             <version>3.0.5</version>
+            <scope>system</scope>
+            <systemPath>${basedir}/prebuilt/jar/capstone-3.0.5.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>keystone</groupId>
             <artifactId>java-bindings</artifactId>
-            <version>0.9.1-1</version>
+            <version>0.9.1-2</version>
+            <scope>system</scope>
+            <systemPath>${basedir}/prebuilt/jar/java-bindings-0.9.1-2.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>cn.banny</groupId>
             <artifactId>utils</artifactId>
             <version>0.0.8</version>
+            <scope>system</scope>
+            <systemPath>${basedir}/prebuilt/jar/utils-0.0.8.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>commons-io</groupId>
@@ -88,6 +132,11 @@
             <version>2.6.4</version>
         </dependency>
         <dependency>
+            <groupId>io.kaitai</groupId>
+            <artifactId>kaitai-struct-runtime</artifactId>
+            <version>0.8</version>
+        </dependency>
+        <dependency>
             <groupId>log4j</groupId>
             <artifactId>log4j</artifactId>
             <version>1.2.17</version>
@@ -99,7 +148,27 @@
             <version>3.8.2</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>commons-codec</groupId>
+            <artifactId>commons-codec</artifactId>
+            <version>1.11</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+    <repositories>
+        <repository>
+            <id>nexus</id>
+            <url>http://p.gzmtx.cn:8081/nexus/content/groups/public/</url>
+            <releases>
+                <enabled>true</enabled>
+                <updatePolicy>always</updatePolicy>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+                <updatePolicy>always</updatePolicy>
+            </snapshots>
+        </repository>
+    </repositories>
     <distributionManagement>
         <repository>
             <id>releases</id>

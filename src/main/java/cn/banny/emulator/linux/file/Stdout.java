@@ -1,11 +1,13 @@
 package cn.banny.emulator.linux.file;
 
+import cn.banny.emulator.file.FileIO;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.io.RandomAccessFile;
 
 public class Stdout extends SimpleFileIO {
@@ -13,11 +15,13 @@ public class Stdout extends SimpleFileIO {
     private static final Log log = LogFactory.getLog(Stdout.class);
 
     private final boolean err;
+    private PrintStream out;
 
     public Stdout(int oflags, File file, String path, boolean err) {
         super(oflags, file, path);
 
         this.err = err;
+        out = err ? System.err : System.out;
 
         if (log.isDebugEnabled()) {
             setDebugStream(err ? System.err : System.out);
@@ -44,6 +48,8 @@ public class Stdout extends SimpleFileIO {
             if (debugStream != null) {
                 debugStream.write(data);
             }
+            out.write(data);
+            out.flush();
 
             output.write(data);
             return data.length;

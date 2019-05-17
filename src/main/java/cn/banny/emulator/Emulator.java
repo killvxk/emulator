@@ -1,22 +1,23 @@
 package cn.banny.emulator;
 
 import cn.banny.emulator.debugger.Debugger;
-import cn.banny.emulator.linux.Module;
 import cn.banny.emulator.linux.android.dvm.VM;
 import cn.banny.emulator.memory.Memory;
 import cn.banny.emulator.memory.SvcMemory;
+import cn.banny.emulator.spi.*;
 import unicorn.Unicorn;
 
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.net.URL;
 
 /**
  * cpu emulator
  * Created by zhkl0228 on 2017/5/2.
  */
 
-public interface Emulator extends Closeable, Disassembler {
+public interface Emulator extends Closeable, Disassembler, ValuePair {
 
     int getPointerSize();
 
@@ -43,9 +44,9 @@ public interface Emulator extends Closeable, Disassembler {
 
     void runAsm(String...asm);
 
-    Number[] eFunc(long begin, Number... args);
+    Number[] eFunc(long begin, Number... arguments);
 
-    void eInit(long begin);
+    void eInit(long begin, Number... arguments);
 
     Number eEntry(long begin, long sp);
 
@@ -100,5 +101,16 @@ public interface Emulator extends Closeable, Disassembler {
      * @param apkFile 可为null
      */
     VM createDalvikVM(File apkFile);
+
+    String getLibraryExtension();
+    String getLibraryPath();
+    LibraryFile createURLibraryFile(URL url, String libName);
+
+    Dlfcn getDlfcn();
+
+    /**
+     * @param timeout  Duration to emulate the code (in microseconds). When this value is 0, we will emulate the code in infinite time, until the code is finished.
+     */
+    void setTimeout(long timeout);
 
 }

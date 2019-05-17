@@ -2,6 +2,8 @@ package cn.banny.emulator.pointer;
 
 import cn.banny.emulator.Emulator;
 import cn.banny.emulator.InvalidMemoryAccessException;
+import cn.banny.emulator.Module;
+import cn.banny.emulator.memory.Memory;
 import com.sun.jna.NativeLong;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
@@ -86,7 +88,9 @@ public class UnicornPointer extends Pointer {
 
     @Override
     public void read(long offset, int[] buf, int index, int length) {
-        throw new AbstractMethodError();
+        for (int i = index; i < length; i++) {
+            buf[i] = getInt((i - index) * 4 + offset);
+        }
     }
 
     @Override
@@ -142,7 +146,9 @@ public class UnicornPointer extends Pointer {
 
     @Override
     public void write(long offset, int[] buf, int index, int length) {
-        throw new AbstractMethodError();
+        for (int i = index; i < length; i++) {
+            setInt((i - index) * 4 + offset, buf[i]);
+        }
     }
 
     @Override
@@ -207,11 +213,15 @@ public class UnicornPointer extends Pointer {
 
     @Override
     public UnicornPointer getPointer(long offset) {
-        return pointer(emulator, pointerSize == 4 ? (Number) getInt(offset) : (Number) getLong(0));
+        return pointer(emulator, pointerSize == 4 ? (Number) getInt(offset) : (Number) getLong(offset));
     }
 
     @Override
     public byte[] getByteArray(long offset, int arraySize) {
+        if (size > 0 && offset + arraySize > size) {
+            throw new InvalidMemoryAccessException();
+        }
+
         return unicorn.mem_read(peer + offset, arraySize);
     }
 
@@ -262,6 +272,10 @@ public class UnicornPointer extends Pointer {
 
             if (baos.size() > 0x10000) { // 64k
                 throw new IllegalStateException("buffer overflow");
+            }
+
+            if (size > 0 && offset + baos.size() > size) {
+                throw new InvalidMemoryAccessException();
             }
         }
 
@@ -374,7 +388,7 @@ public class UnicornPointer extends Pointer {
 
         UnicornPointer pointer = new UnicornPointer(emulator, peer + offset, pointerSize);
         if (size > 0) {
-            if (offset >= size) {
+            if (offset > size) {
                 throw new InvalidMemoryAccessException();
             }
 
@@ -388,7 +402,9 @@ public class UnicornPointer extends Pointer {
 
     @Override
     public String toString() {
-        return "unicorn@0x" + Long.toHexString(peer);
+        Memory memory = emulator == null ? null : emulator.getMemory();
+        Module module = memory == null ? null : memory.findModuleByAddress(peer);
+        return "unicorn@0x" + Long.toHexString(peer) + (module == null ? "" : ("[" + module.name + "]0x" + Long.toHexString(peer - module.base)));
     }
 
     @Override

@@ -1,11 +1,12 @@
 package cn.banny.emulator.memory;
 
-import cn.banny.emulator.Loader;
-import cn.banny.emulator.linux.IO;
+import cn.banny.emulator.spi.Loader;
+import cn.banny.emulator.unix.IO;
 import cn.banny.emulator.pointer.UnicornPointer;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collection;
 
 public interface Memory extends IO, Loader {
 
@@ -20,6 +21,7 @@ public interface Memory extends IO, Loader {
     UnicornPointer writeStackBytes(byte[] data);
     UnicornPointer pointer(long address);
     void setStackPoint(long sp);
+    long getStackPoint();
 
     void setCallInitFunction();
 
@@ -39,5 +41,7 @@ public interface Memory extends IO, Loader {
 
     File dumpHeap() throws IOException;
     File dumpStack() throws IOException;
+
+    Collection<MemoryMap> getMemoryMap();
 
 }

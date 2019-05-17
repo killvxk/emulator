@@ -1,5 +1,7 @@
 package cn.banny.emulator.linux.android.dvm;
 
+import cn.banny.emulator.Emulator;
+import cn.banny.emulator.Module;
 import com.sun.jna.Pointer;
 
 import java.io.File;
@@ -38,4 +40,11 @@ public interface VM {
     DalvikModule loadLibrary(File elfFile, boolean forceCallInit) throws IOException;
 
     int addLocalObject(DvmObject object);
+
+    void callJNI_OnLoad(Emulator emulator, Module module) throws IOException;
+
+    /**
+     * 设置apkFile以后，可调用该值获取apk对应的packageName
+     */
+    String getPackageName();
 }

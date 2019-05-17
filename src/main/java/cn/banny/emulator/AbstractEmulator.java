@@ -1,12 +1,16 @@
 package cn.banny.emulator;
 
+import cn.banny.emulator.arm.Arguments;
 import cn.banny.emulator.debugger.Debugger;
-import cn.banny.emulator.linux.android.dvm.DalvikVM;
-import cn.banny.emulator.linux.android.dvm.DalvikVM64;
-import cn.banny.emulator.linux.android.dvm.VM;
+import cn.banny.emulator.memory.Memory;
 import cn.banny.emulator.memory.MemoryBlock;
 import cn.banny.emulator.memory.MemoryBlockImpl;
+import cn.banny.emulator.memory.SvcMemory;
 import cn.banny.emulator.pointer.UnicornPointer;
+import cn.banny.emulator.spi.Dlfcn;
+import cn.banny.emulator.unix.UnixSyscallHandler;
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -15,7 +19,7 @@ import unicorn.*;
 import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
-import java.util.Arrays;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -27,13 +31,18 @@ public abstract class AbstractEmulator implements Emulator {
 
     private static final Log log = LogFactory.getLog(AbstractEmulator.class);
 
-    private static final long DEFAULT_TIMEOUT = TimeUnit.HOURS.toMicros(1);
+    public static final long DEFAULT_TIMEOUT = TimeUnit.HOURS.toMicros(1);
 
     protected final Unicorn unicorn;
 
     private final int pid;
 
     protected long timeout = DEFAULT_TIMEOUT;
+
+    public static final ThreadLocal<Integer> POINTER_SIZE = new ThreadLocal<>();
+    static {
+        POINTER_SIZE.set(Native.POINTER_SIZE);
+    }
 
     public AbstractEmulator(int unicorn_arch, int unicorn_mode, String processName) {
         super();
@@ -48,7 +57,15 @@ public abstract class AbstractEmulator implements Emulator {
         String name = ManagementFactory.getRuntimeMXBean().getName();
         String pid = name.split("@")[0];
         this.pid = Integer.parseInt(pid);
+
+        POINTER_SIZE.set(getPointerSize());
     }
+
+    protected  abstract Memory createMemory(UnixSyscallHandler syscallHandler);
+
+    protected abstract Dlfcn createDyld(SvcMemory svcMemory);
+
+    protected abstract UnixSyscallHandler createSyscallHandler(SvcMemory svcMemory);
 
     @Override
     public void runAsm(String... asm) {
@@ -58,13 +75,15 @@ public abstract class AbstractEmulator implements Emulator {
             throw new IllegalStateException("run asm failed");
         }
 
+        long spBackup = getMemory().getStackPoint();
         MemoryBlock block = MemoryBlockImpl.allocExecutable(getMemory(), shellCode.length);
         UnicornPointer pointer = block.getPointer();
         pointer.write(0, shellCode, 0, shellCode.length);
         try {
             emulate(pointer.peer, pointer.peer + shellCode.length, 0, false);
         } finally {
-            block.free();
+            block.free(false);
+            getMemory().setStackPoint(spBackup);
         }
     }
 
@@ -148,6 +167,11 @@ public abstract class AbstractEmulator implements Emulator {
     private final WriteHook writeHook;
     private final AssemblyCodeDumper codeHook;
 
+    @Override
+    public void setTimeout(long timeout) {
+        this.timeout = timeout;
+    }
+
     /**
      * Emulate machine code in a specific duration of time.
      * @param begin    Address where emulation starts
@@ -155,7 +179,11 @@ public abstract class AbstractEmulator implements Emulator {
      * @param timeout  Duration to emulate the code (in microseconds). When this value is 0, we will emulate the code in infinite time, until the code is finished.
      */
     protected final Number emulate(long begin, long until, long timeout, boolean entry) {
+        final Pointer pointer = UnicornPointer.pointer(this, begin);
+        long start = 0;
         try {
+            POINTER_SIZE.set(getPointerSize());
+
             if (entry) {
                 if (traceMemoryRead) {
                     traceMemoryRead = false;
@@ -171,27 +199,36 @@ public abstract class AbstractEmulator implements Emulator {
                 codeHook.initialize(traceInstructionBegin, traceInstructionEnd);
                 unicorn.hook_add(codeHook, traceInstructionBegin, traceInstructionEnd, this);
             }
+            log.debug("emulate " + pointer + " started sp=" + getStackPointer());
+            start = System.currentTimeMillis();
             unicorn.emu_start(begin, until, timeout, (long) 0);
             return (Number) unicorn.reg_read(getPointerSize() == 4 ? ArmConst.UC_ARM_REG_R0 : Arm64Const.UC_ARM64_REG_X0);
         } catch (RuntimeException e) {
             if (!entry && e instanceof UnicornException) {
-                log.warn("emulate failed", e);
+                log.warn("emulate " + pointer + " failed: sp=" + getStackPointer() + ", offset=" + (System.currentTimeMillis() - start) + "ms", e);
                 return -1;
             }
 
-            e.printStackTrace();
-            attach().debug(this);
-            IOUtils.closeQuietly(this);
-            throw e;
+            if (log.isDebugEnabled()) {
+                e.printStackTrace();
+                attach().debug(this);
+                IOUtils.closeQuietly(this);
+                throw e;
+            } else {
+                log.warn("emulate " + pointer + " exception sp=" + getStackPointer() + ", msg=" + e.getMessage() + ", offset=" + (System.currentTimeMillis() - start) + "ms");
+                return -1;
+            }
         } finally {
             if (entry) {
                 unicorn.hook_del(readHook);
                 unicorn.hook_del(writeHook);
             }
             unicorn.hook_del(codeHook);
-            log.debug("emulate finish");
+            log.debug("emulate " + pointer + " finished sp=" + getStackPointer() + ", offset=" + (System.currentTimeMillis() - start) + "ms");
         }
     }
+
+    protected abstract Pointer getStackPointer();
 
     private boolean closed;
 
@@ -204,7 +241,7 @@ public abstract class AbstractEmulator implements Emulator {
         try {
             closeInternal();
 
-            unicorn.close();
+            // unicorn.close(); // May cause crash
         } finally {
             closed = true;
         }
@@ -248,8 +285,24 @@ public abstract class AbstractEmulator implements Emulator {
         return workDir;
     }
 
-    @Override
-    public VM createDalvikVM(File apkFile) {
-        return getPointerSize() == 4 ? new DalvikVM(this, apkFile) : new DalvikVM64(this, apkFile);
+    protected final Number[] eFunc(long begin, Arguments args, long lr, boolean entry) {
+        final List<Number> numbers = new ArrayList<>(10);
+        numbers.add(emulate(begin, lr, timeout, entry));
+        numbers.addAll(args.pointers);
+        return numbers.toArray(new Number[0]);
     }
+
+    private final Map<String, Object> context = new HashMap<>();
+
+    @Override
+    public void set(String key, Object value) {
+        context.put(key, value);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Override
+    public <T> T get(String key) {
+        return (T) context.get(key);
+    }
+
 }

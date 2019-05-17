@@ -1,11 +1,21 @@
-# emulator
+# unidbg
 
 Allows you to emulate an Android ARM32 and/or ARM64 native library.<br>
 
 This is an educational project to learn more about the ELF file format and ARM assembly.
 
+QQ Group: 675443841
+
+## License
+- unidbg uses software libraries from [Apache Software Foundation](http://apache.org). 
+- unidbg developers Idea enterprise licenses are supported by [Jetbrains](https://www.jetbrains.com?from=unidbg).
+- [IntelliJ IDEA](https://www.jetbrains.com/idea?from=unidbg) can be used to edit unidbg sources.
+- ![](assets/idea_logo.svg)
 
 ## Usage
+
+VM options: -Djava.library.path=prebuilt/os -Djna.library.path=prebuilt/os  
+Where os may: linux64, win32, win64, osx64
 
 Simple tests under src/test directory
 - [src/test/java/com/bytedance/frameworks/core/encrypt/TTEncrypt.java](https://github.com/zhkl0228/emulator/blob/master/src/test/java/com/bytedance/frameworks/core/encrypt/TTEncrypt.java)  
@@ -33,6 +43,10 @@ Simple tests under src/test directory
 - Import hook, thanks to xHook.
 - Support simple debugger, instruction trace, memory read/write trace.
 
+## TODO
+- Working iOS emulation.
+- ~~Support iOS objc.~~
+
 ## Thanks
 - [unicorn](https://github.com/unicorn-engine/unicorn)
 - [HookZz](https://github.com/jmpews/HookZz)
@@ -44,3 +58,4 @@ Simple tests under src/test directory
 - [idaemu](https://github.com/36hours/idaemu)
 - [jelf](https://github.com/fornwall/jelf)
 - [whale](https://github.com/asLody/whale)
+- [kaitai_struct](https://github.com/kaitai-io/kaitai_struct)

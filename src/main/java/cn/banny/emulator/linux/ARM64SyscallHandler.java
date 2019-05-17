@@ -1,12 +1,23 @@
 package cn.banny.emulator.linux;
 
 import cn.banny.auxiliary.Inspector;
-import cn.banny.emulator.*;
+import cn.banny.emulator.Emulator;
+import cn.banny.emulator.StopEmulatorException;
+import cn.banny.emulator.Svc;
 import cn.banny.emulator.arm.ARM;
 import cn.banny.emulator.arm.ARMEmulator;
-import cn.banny.emulator.linux.file.*;
+import cn.banny.emulator.file.FileIO;
+import cn.banny.emulator.linux.file.LocalAndroidUdpSocket;
+import cn.banny.emulator.linux.file.LocalSocketIO;
 import cn.banny.emulator.memory.SvcMemory;
 import cn.banny.emulator.pointer.UnicornPointer;
+import cn.banny.emulator.spi.SyscallHandler;
+import cn.banny.emulator.unix.IO;
+import cn.banny.emulator.unix.UnixEmulator;
+import cn.banny.emulator.unix.UnixSyscallHandler;
+import cn.banny.emulator.unix.file.SocketIO;
+import cn.banny.emulator.unix.file.TcpSocket;
+import cn.banny.emulator.unix.file.UdpSocket;
 import com.sun.jna.Pointer;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.logging.Log;
@@ -17,14 +28,15 @@ import unicorn.Unicorn;
 import unicorn.UnicornException;
 
 import java.io.File;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 import static unicorn.ArmConst.UC_ARM_REG_C13_C0_3;
 
 /**
  * http://androidxref.com/6.0.0_r5/xref/external/kernel-headers/original/uapi/asm-generic/unistd.h
  */
-public class ARM64SyscallHandler extends AbstractSyscallHandler implements SyscallHandler {
+public class ARM64SyscallHandler extends UnixSyscallHandler implements SyscallHandler {
 
     private static final Log log = LogFactory.getLog(ARM64SyscallHandler.class);
 
@@ -50,11 +62,11 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
             if (svcNumber != 0) {
                 Svc svc = svcMemory.getSvc(svcNumber);
                 if (svc != null) {
-                    u.reg_write(Arm64Const.UC_ARM64_REG_X0, svc.handle(u, emulator));
+                    u.reg_write(Arm64Const.UC_ARM64_REG_X0, svc.handle(emulator));
                     return;
                 }
                 u.emu_stop();
-                throw new IllegalStateException("svc number: " + svcNumber);
+                throw new UnicornException("svc number: " + svcNumber);
             }
 
             if (log.isDebugEnabled()) {
@@ -316,7 +328,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
             exception = e;
         }
 
-        log.warn("handleInterrupt intno=" + intno + ", NR=" + NR + ", svcNumber=0x" + Integer.toHexString(svcNumber) + ", PC=" + pc + ", syscall=" + syscall, exception);
+        log.warn("handleInterrupt intno=" + intno + ", NR=" + NR + ", svcNumber=0x" + Integer.toHexString(svcNumber) + ", PC=" + pc + ", LR=" + UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_LR) + ", syscall=" + syscall, exception);
 
         if (exception instanceof UnicornException) {
             throw (UnicornException) exception;
@@ -345,7 +357,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
             int writefd = pipefd.getInt(4);
             log.debug("pipe readfd=" + readfd + ", writefd=" + writefd);
         }
-        emulator.getMemory().setErrno(LinuxEmulator.EFAULT);
+        emulator.getMemory().setErrno(UnixEmulator.EFAULT);
         return -1;
     }
 
@@ -379,7 +391,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
 
     private int fork(Emulator emulator) {
         log.debug("fork");
-        emulator.getMemory().setErrno(LinuxEmulator.ENOSYS);
+        emulator.getMemory().setErrno(UnixEmulator.ENOSYS);
         return -1;
     }
 
@@ -544,7 +556,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         if (log.isDebugEnabled()) {
             log.debug("bionic_clone child_stack=" + child_stack + ", thread_id=" + threadId + ", pid=" + pid + ", tls=" + tls + ", ctid=" + ctid + ", fn=" + fn + ", arg=" + arg + ", flags=" + list);
         }
-        emulator.getMemory().setErrno(LinuxEmulator.EAGAIN);
+        emulator.getMemory().setErrno(UnixEmulator.EAGAIN);
         throw new AbstractMethodError();
     }
 
@@ -578,7 +590,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
 
         FileIO io = fdMap.get(fd);
         if (io == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         } else {
             return io.llseek(offset_high, offset_low, result, whence);
@@ -588,11 +600,15 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
     private int access(Unicorn u, Emulator emulator) {
         Pointer pathname = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
         int mode = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R1)).intValue();
+        String path = pathname.getString(0);
         if (log.isDebugEnabled()) {
-            log.debug("access pathname=" + pathname.getString(0) + ", mode=" + mode);
+            log.debug("access pathname=" + path + ", mode=" + mode);
         }
-        emulator.getMemory().setErrno(LinuxEmulator.EACCES);
-        return -1;
+        int ret = faccessat(emulator, path);
+        if (ret == -1) {
+            log.info("access pathname=" + path + ", mode=" + mode);
+        }
+        return ret;
     }
 
     private int execve(Emulator emulator) {
@@ -614,7 +630,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
             }
             log.debug("execve filename=" + filename.getString(0) + ", args=" + args + ", env=" + env);
         }
-        emulator.getMemory().setErrno(LinuxEmulator.EACCES);
+        emulator.getMemory().setErrno(UnixEmulator.EACCES);
         return -1;
     }
 
@@ -643,7 +659,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
 
         FileIO io = fdMap.get(sockfd);
         if (io == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
         return io.shutdown(how);
@@ -654,7 +670,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
 
         FileIO io = fdMap.get(oldfd);
         if (io == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
         if (log.isDebugEnabled()) {
@@ -689,16 +705,6 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         return stat64(emulator, path, statbuf);
     }
 
-    private int stat64(Emulator emulator, String pathname, Pointer statbuf) {
-        FileIO io = resolve(emulator.getWorkDir(), pathname, FileIO.O_RDONLY);
-        if (io != null) {
-            return io.fstat(emulator, emulator.getUnicorn(), statbuf);
-        }
-
-        emulator.getMemory().setErrno(LinuxEmulator.EACCES);
-        return -1;
-    }
-
     private int newselect(Unicorn u, Emulator emulator) {
         int nfds = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
         Pointer readfds = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
@@ -718,7 +724,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
             }
         }
         if (exceptfds != null) {
-            emulator.getMemory().setErrno(LinuxEmulator.ENOMEM);
+            emulator.getMemory().setErrno(UnixEmulator.ENOMEM);
             return -1;
         }
         if (writefds != null) {
@@ -764,7 +770,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
 
         FileIO io = fdMap.get(sockfd);
         if (io == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
 
@@ -840,7 +846,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         if (log.isDebugEnabled()) {
             log.debug("mkdir pathname=" + pathname.getString(0) + ", mode=" + mode);
         }
-        emulator.getMemory().setErrno(LinuxEmulator.EACCES);
+        emulator.getMemory().setErrno(UnixEmulator.EACCES);
         return -1;
     }
 
@@ -858,11 +864,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         int how = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
         Pointer set = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
         Pointer oldset = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R2);
-        if (log.isDebugEnabled()) {
-            log.debug("sigprocmask how=" + how + ", set=" + set + ", oldset=" + oldset);
-        }
-        emulator.getMemory().setErrno(LinuxEmulator.EINVAL);
-        return -1;
+        return sigprocmask(emulator, how, set, oldset);
     }
 
     private int lgetxattr(Unicorn u, Emulator emulator) {
@@ -884,7 +886,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         if (log.isDebugEnabled()) {
             log.debug("reboot magic=" + magic + ", magic2=" + magic2 + ", cmd=" + cmd + ", arg=" + arg);
         }
-        emulator.getMemory().setErrno(LinuxEmulator.EPERM);
+        emulator.getMemory().setErrno(UnixEmulator.EPERM);
         return -1;
     }
 
@@ -922,66 +924,12 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         return 0;
     }
 
-    private final Map<Integer, byte[]> sigMap = new HashMap<>();
-
-    private static final int SIGHUP = 1;
-    private static final int SIGINT = 2;
-    private static final int SIGQUIT = 3;
-    private static final int SIGILL = 4;
-    private static final int SIGABRT = 6;
-    private static final int SIGSEGV = 11;
-    private static final int SIGPIPE = 13;
-    private static final int SIGALRM = 14;
-    private static final int SIGTERM = 15;
-    private static final int SIGCHLD = 17;
-    private static final int SIGTSTP = 20;
-    private static final int SIGTTIN = 21;
-    private static final int SIGTTOU = 22;
-    private static final int SIGWINCH = 28;
-
     private int sigaction(Unicorn u, Emulator emulator) {
         int signum = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
         Pointer act = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
         Pointer oldact = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R2);
 
-        String prefix = "Unknown";
-        if (signum > 32) {
-            signum -= 32;
-            prefix = "Real-time";
-        }
-        if (log.isDebugEnabled()) {
-            log.debug("sigaction signum=" + signum + ", act=" + act + ", oldact=" + oldact + ", prefix=" + prefix);
-        }
-
-        final int ACT_SIZE = 16;
-        if (oldact != null) {
-            byte[] lastAct = sigMap.get(signum);
-            byte[] data = lastAct == null ? new byte[ACT_SIZE] : lastAct;
-            oldact.write(0, data, 0, data.length);
-        }
-
-        switch (signum) {
-            case SIGHUP:
-            case SIGINT:
-            case SIGQUIT:
-            case SIGILL:
-            case SIGABRT:
-            case SIGSEGV:
-            case SIGPIPE:
-            case SIGALRM:
-            case SIGTERM:
-            case SIGCHLD:
-            case SIGTSTP:
-            case SIGTTIN:
-            case SIGTTOU:
-            case SIGWINCH:
-                if (act != null) {
-                    sigMap.put(signum, act.getByteArray(0, ACT_SIZE));
-                }
-                return 0;
-        }
-
-        throw new UnsupportedOperationException("signum=" + signum);
+        return sigaction(signum, act, oldact);
     }
 
     private int recvfrom(Unicorn u, Emulator emulator) {
@@ -997,7 +945,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         }
         FileIO file = fdMap.get(sockfd);
         if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
         return file.recvfrom(u, buf, len, flags, src_addr, addrlen);
@@ -1011,33 +959,14 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         Pointer dest_addr = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R4);
         int addrlen = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R5)).intValue();
 
-        byte[] data = buf.getByteArray(0, len);
-        if (log.isDebugEnabled()) {
-            Inspector.inspect(data, "sendto sockfd=" + sockfd + ", buf=" + buf + ", flags=" + flags + ", dest_addr=" + dest_addr + ", addrlen=" + addrlen);
-        }
-        FileIO file = fdMap.get(sockfd);
-        if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
-            return -1;
-        }
-        return file.sendto(data, flags, dest_addr, addrlen);
+        return sendto(emulator, sockfd, buf, len, flags, dest_addr, addrlen);
     }
 
     private int connect(Unicorn u, Emulator emulator) {
         int sockfd = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
         Pointer addr = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
         int addrlen = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
-        if (log.isDebugEnabled()) {
-            byte[] data = addr.getByteArray(0, addrlen);
-            Inspector.inspect(data, "connect sockfd=" + sockfd + ", addr=" + addr + ", addrlen=" + addrlen);
-        }
-
-        FileIO file = fdMap.get(sockfd);
-        if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
-            return -1;
-        }
-        return file.connect(addr, addrlen);
+        return connect(emulator, sockfd, addr, addrlen);
     }
 
     private int getsockname(Unicorn u, Emulator emulator) {
@@ -1049,7 +978,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         }
         FileIO file = fdMap.get(sockfd);
         if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
         return file.getsockname(addr, addrlen);
@@ -1067,7 +996,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
 
         FileIO file = fdMap.get(sockfd);
         if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
         return file.getsockopt(level, optname, optval, optlen);
@@ -1085,7 +1014,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
 
         FileIO file = fdMap.get(sockfd);
         if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
         return file.setsockopt(level, optname, optval, optlen);
@@ -1115,10 +1044,10 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
                         return fd;
                     case SocketIO.SOCK_DGRAM:
                         fd = getMinFd();
-                        fdMap.put(fd, new LocalUdpSocket(emulator));
+                        fdMap.put(fd, new LocalAndroidUdpSocket(emulator));
                         return fd;
                     default:
-                        emulator.getMemory().setErrno(LinuxEmulator.EACCES);
+                        emulator.getMemory().setErrno(UnixEmulator.EACCES);
                         return -1;
                 }
             case SocketIO.AF_INET:
@@ -1284,16 +1213,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         int fd = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
         int cmd = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R1)).intValue();
         int arg = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
-        if (log.isDebugEnabled()) {
-            log.debug("fcntl fd=" + fd + ", cmd=" + cmd + ", arg=" + arg);
-        }
-
-        FileIO file = fdMap.get(fd);
-        if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
-            return -1;
-        }
-        return file.fcntl(cmd, arg);
+        return fcntl(emulator, fd, cmd, arg);
     }
 
     private int writev(Unicorn u, Emulator emulator) {
@@ -1311,7 +1231,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
 
         FileIO file = fdMap.get(fd);
         if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
 
@@ -1404,41 +1324,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
     private int gettimeofday(Emulator emulator) {
         Pointer tv = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X0);
         Pointer tz = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X1);
-        if (log.isDebugEnabled()) {
-            log.debug("gettimeofday tv=" + tv + ", tz=" + tz);
-        }
-
-        if (log.isDebugEnabled()) {
-            byte[] before = tv.getByteArray(0, 8);
-            Inspector.inspect(before, "gettimeofday tv");
-        }
-        if (tz != null && log.isDebugEnabled()) {
-            byte[] before = tz.getByteArray(0, 8);
-            Inspector.inspect(before, "gettimeofday tz");
-        }
-
-        long currentTimeMillis = System.currentTimeMillis();
-        long tv_sec = currentTimeMillis / 1000;
-        long tv_usec = (currentTimeMillis % 1000) * 1000;
-        tv.setInt(0, (int) tv_sec);
-        tv.setInt(4, (int) tv_usec);
-
-        if (tz != null) {
-            Calendar calendar = Calendar.getInstance();
-            int tz_minuteswest = -(calendar.get(Calendar.ZONE_OFFSET) + calendar.get(Calendar.DST_OFFSET)) / (60 * 1000);
-            tz.setInt(0, tz_minuteswest);
-            tz.setInt(4, 0); // tz_dsttime
-        }
-
-        if (log.isDebugEnabled()) {
-            byte[] after = tv.getByteArray(0, 8);
-            Inspector.inspect(after, "gettimeofday tv after tv_sec=" + tv_sec + ", tv_usec=" + tv_usec);
-        }
-        if (tz != null && log.isDebugEnabled()) {
-            byte[] after = tz.getByteArray(0, 8);
-            Inspector.inspect(after, "gettimeofday tz after");
-        }
-        return 0;
+        return gettimeofday(tv, tz);
     }
 
     private int faccessat(Unicorn u, Emulator emulator) {
@@ -1458,12 +1344,12 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
     }
 
     private int faccessat(Emulator emulator, String pathname) {
-        FileIO io = resolve(emulator.getWorkDir(), pathname, FileIO.O_RDONLY);
+        FileIO io = resolve(emulator, pathname, FileIO.O_RDONLY);
         if (io != null) {
             return 0;
         }
 
-        emulator.getMemory().setErrno(LinuxEmulator.EACCES);
+        emulator.getMemory().setErrno(UnixEmulator.EACCES);
         return -1;
     }
 
@@ -1484,7 +1370,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
             }
 
             log.warn("fstatat64 dirfd=" + dirfd + ", pathname=" + path + ", statbuf=" + statbuf + ", flags=" + flags);
-            emulator.getMemory().setErrno(LinuxEmulator.EACCES);
+            emulator.getMemory().setErrno(UnixEmulator.EACCES);
             return -1;
         }
     }
@@ -1497,7 +1383,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         if (log.isDebugEnabled()) {
             log.debug("mkdirat dirfd=" + dirfd + ", pathname=" + pathname + ", mode=" + Integer.toHexString(mode));
         }
-        emulator.getMemory().setErrno(LinuxEmulator.EACCES);
+        emulator.getMemory().setErrno(UnixEmulator.EACCES);
         return -1;
     }
 
@@ -1522,7 +1408,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
             }
 
             log.warn("openat dirfd=" + dirfd + ", pathname=" + pathname + ", oflags=0x" + Integer.toHexString(oflags) + ", mode=" + Integer.toHexString(mode));
-            emulator.getMemory().setErrno(LinuxEmulator.EACCES);
+            emulator.getMemory().setErrno(UnixEmulator.EACCES);
             return -1;
         }
     }
@@ -1540,42 +1426,6 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
             log.info("open pathname=" + pathname + ", oflags=0x" + Integer.toHexString(oflags) + ", mode=" + Integer.toHexString(mode));
         }
         return fd;
-    }
-
-    @Override
-    public final int open(Emulator emulator, String pathname, int oflags) {
-        int minFd = this.getMinFd();
-
-        FileIO io = resolve(emulator.getWorkDir(), pathname, oflags);
-        if (io != null) {
-            this.fdMap.put(minFd, io);
-            return minFd;
-        }
-
-        if ("/dev/tty".equals(pathname)) {
-            io = new NullFileIO(pathname);
-            this.fdMap.put(minFd, io);
-            return minFd;
-        }
-
-        if ("/proc/self/maps".equals(pathname) || ("/proc/" + emulator.getPid() + "/maps").equals(pathname)) {
-            io = new MapsFileIO(oflags, pathname, emulator.getMemory().getLoadedModules());
-            this.fdMap.put(minFd, io);
-            return minFd;
-        }
-        FileIO driverIO = DriverFileIO.create(oflags, pathname);
-        if (driverIO != null) {
-            this.fdMap.put(minFd, driverIO);
-            return minFd;
-        }
-        if (IO.STDIN.equals(pathname)) {
-            io = new Stdin(oflags);
-            this.fdMap.put(minFd, io);
-            return minFd;
-        }
-
-        emulator.getMemory().setErrno(LinuxEmulator.EACCES);
-        return -1;
     }
 
     private int ftruncate(Unicorn u) {
@@ -1597,7 +1447,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         int whence = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
         FileIO file = fdMap.get(fd);
         if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
         int pos = file.lseek(offset, whence);
@@ -1618,7 +1468,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
             file.close();
             return 0;
         } else {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
     }
@@ -1633,7 +1483,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
 
         FileIO io = fdMap.get(fd);
         if (io == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         } else {
             return io.getdents64(dirp, count);
@@ -1643,19 +1493,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
     private int fstat(Unicorn u, Emulator emulator) {
         int fd = ((Number) u.reg_read(Arm64Const.UC_ARM64_REG_X0)).intValue();
         Pointer stat = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X1);
-        if (log.isDebugEnabled()) {
-            log.debug("fstat fd=" + fd + ", stat=" + stat);
-        }
-
-        FileIO file = fdMap.get(fd);
-        if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
-            return -1;
-        }
-        if (log.isDebugEnabled()) {
-            log.debug("fstat file=" + file + ", stat=" + stat);
-        }
-        return file.fstat(emulator, u, stat);
+        return fstat(emulator, fd, stat);
     }
 
     private int ioctl(Unicorn u, Emulator emulator) {
@@ -1668,12 +1506,12 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
 
         FileIO file = fdMap.get(fd);
         if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
         int ret = file.ioctl(emulator, request, argp);
         if (ret == -1) {
-            emulator.getMemory().setErrno(LinuxEmulator.ENOTTY);
+            emulator.getMemory().setErrno(UnixEmulator.ENOTTY);
         }
         return ret;
     }
@@ -1682,33 +1520,14 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
         int fd = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
         Pointer buffer = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
         int count = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
-        byte[] data = buffer.getByteArray(0, count);
-        if (log.isDebugEnabled()) {
-            Inspector.inspect(data, "write fd=" + fd + ", buffer=" + buffer + ", count=" + count);
-        }
-
-        FileIO file = fdMap.get(fd);
-        if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
-            return -1;
-        }
-        return file.write(data);
+        return write(emulator, fd, buffer, count);
     }
 
     private int read(Unicorn u, Emulator emulator) {
         int fd = ((Number) u.reg_read(Arm64Const.UC_ARM64_REG_X0)).intValue();
         Pointer buffer = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X1);
         int count = ((Number) u.reg_read(Arm64Const.UC_ARM64_REG_X2)).intValue();
-        if (log.isDebugEnabled()) {
-            log.debug("read fd=" + fd + ", buffer=" + buffer + ", count=" + count);
-        }
-
-        FileIO file = fdMap.get(fd);
-        if (file == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
-            return -1;
-        }
-        return file.read(u, buffer, count);
+        return read(emulator, fd, buffer, count);
     }
 
     private int dup2(Unicorn u, Emulator emulator) {
@@ -1720,7 +1539,7 @@ public class ARM64SyscallHandler extends AbstractSyscallHandler implements Sysca
 
         FileIO old = fdMap.get(oldfd);
         if (old == null) {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
 

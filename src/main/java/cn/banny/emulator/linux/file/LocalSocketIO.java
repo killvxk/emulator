@@ -2,7 +2,9 @@ package cn.banny.emulator.linux.file;
 
 import cn.banny.auxiliary.Inspector;
 import cn.banny.emulator.Emulator;
-import cn.banny.emulator.linux.LinuxEmulator;
+import cn.banny.emulator.file.FileIO;
+import cn.banny.emulator.unix.UnixEmulator;
+import cn.banny.emulator.unix.file.SocketIO;
 import com.sun.jna.Pointer;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -84,7 +86,7 @@ public class LocalSocketIO extends SocketIO implements FileIO {
     }
 
     @Override
-    InetSocketAddress getLocalSocketAddress() {
+    protected InetSocketAddress getLocalSocketAddress() {
         throw new AbstractMethodError();
     }
 
@@ -238,41 +240,41 @@ public class LocalSocketIO extends SocketIO implements FileIO {
                 return 0;
         }
 
-        emulator.getMemory().setErrno(LinuxEmulator.EPERM);
+        emulator.getMemory().setErrno(UnixEmulator.EPERM);
         return -1;
     }
 
     @Override
-    int connect_ipv6(Pointer addr, int addrlen) {
+    protected int connect_ipv6(Pointer addr, int addrlen) {
         throw new AbstractMethodError();
     }
 
     @Override
-    int connect_ipv4(Pointer addr, int addrlen) {
+    protected int connect_ipv4(Pointer addr, int addrlen) {
         throw new AbstractMethodError();
     }
 
     @Override
-    void setReuseAddress(int reuseAddress) {
+    protected void setReuseAddress(int reuseAddress) {
     }
 
     @Override
-    void setKeepAlive(int keepAlive) {
+    protected void setKeepAlive(int keepAlive) {
         throw new AbstractMethodError();
     }
 
     @Override
-    void setSocketRecvBuf(int recvBuf) {
+    protected void setSocketRecvBuf(int recvBuf) {
         throw new AbstractMethodError();
     }
 
     @Override
-    void setTcpNoDelay(int tcpNoDelay) {
+    protected void setTcpNoDelay(int tcpNoDelay) {
         throw new AbstractMethodError();
     }
 
     @Override
-    int getTcpNoDelay() {
+    protected int getTcpNoDelay() {
         throw new AbstractMethodError();
     }
 }
