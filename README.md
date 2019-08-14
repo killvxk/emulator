@@ -1,6 +1,6 @@
 # unidbg
 
-Allows you to emulate an Android ARM32 and/or ARM64 native library.<br>
+Allows you to emulate an Android ARM32 and/or ARM64 native library, and an experimental  iOS ARM32 emulation.<br>
 
 This is an educational project to learn more about the ELF file format and ARM assembly.
 
@@ -18,21 +18,24 @@ VM options: -Djava.library.path=prebuilt/os -Djna.library.path=prebuilt/os
 Where os may: linux64, win32, win64, osx64
 
 Simple tests under src/test directory
-- [src/test/java/com/bytedance/frameworks/core/encrypt/TTEncrypt.java](https://github.com/zhkl0228/emulator/blob/master/src/test/java/com/bytedance/frameworks/core/encrypt/TTEncrypt.java)  
+- [src/test/java/com/bytedance/frameworks/core/encrypt/TTEncrypt.java](https://github.com/zhkl0228/unidbg/blob/master/src/test/java/com/bytedance/frameworks/core/encrypt/TTEncrypt.java)  
 
 ![](assets/TTEncrypt.gif)
 ***
-- [src/test/java/com/sun/jna/JniDispatch32.java](https://github.com/zhkl0228/emulator/blob/master/src/test/java/com/sun/jna/JniDispatch32.java)  
+- [src/test/java/com/sun/jna/JniDispatch32.java](https://github.com/zhkl0228/unidbg/blob/master/src/test/java/com/sun/jna/JniDispatch32.java)  
 ![](assets/JniDispatch32.gif)
 ***
-- [src/test/java/com/sun/jna/JniDispatch64.java](https://github.com/zhkl0228/emulator/blob/master/src/test/java/com/sun/jna/JniDispatch64.java)  
+- [src/test/java/com/sun/jna/JniDispatch64.java](https://github.com/zhkl0228/unidbg/blob/master/src/test/java/com/sun/jna/JniDispatch64.java)  
 ![](assets/JniDispatch64.gif)
 ***
-- [src/test/java/org/telegram/messenger/Utilities32.java](https://github.com/zhkl0228/emulator/blob/master/src/test/java/org/telegram/messenger/Utilities32.java)  
+- [src/test/java/org/telegram/messenger/Utilities32.java](https://github.com/zhkl0228/unidbg/blob/master/src/test/java/org/telegram/messenger/Utilities32.java)  
 ![](assets/Utilities32.gif)
 ***
-- [src/test/java/org/telegram/messenger/Utilities64.java](https://github.com/zhkl0228/emulator/blob/master/src/test/java/org/telegram/messenger/Utilities64.java)  
+- [src/test/java/org/telegram/messenger/Utilities64.java](https://github.com/zhkl0228/unidbg/blob/master/src/test/java/org/telegram/messenger/Utilities64.java)  
 ![](assets/Utilities64.gif)
+
+## More tests
+- [src/test/java/cn/banny/emulator/QDReaderJni.java](https://github.com/zhkl0228/unidbg/blob/master/src/test/java/cn/banny/emulator/QDReaderJni.java)
 
 ## Features
 - Emulation of the JNI Invocation API so JNI_OnLoad can be called.
@@ -41,11 +44,11 @@ Simple tests under src/test directory
 - Support ARM32 and ARM64 bit ELF.
 - Inline hook, thanks to HookZz.
 - Import hook, thanks to xHook.
-- Support simple debugger, instruction trace, memory read/write trace.
+- Support simple debugger, gdb stub, instruction trace, memory read/write trace.
 
 ## TODO
-- Working iOS emulation.
-- ~~Support iOS objc.~~
+- ~~Working iOS emulation.~~
+- ~~Working iOS objc.~~
 
 ## Thanks
 - [unicorn](https://github.com/unicorn-engine/unicorn)
@@ -59,3 +62,4 @@ Simple tests under src/test directory
 - [jelf](https://github.com/fornwall/jelf)
 - [whale](https://github.com/asLody/whale)
 - [kaitai_struct](https://github.com/kaitai-io/kaitai_struct)
+- [fishhook](https://github.com/facebook/fishhook)
